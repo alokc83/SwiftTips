@@ -2,10 +2,22 @@
 
 One of the things I really love about Swift is how I keep finding interesting ways to use it in various situations, and when I do - I usually share them on [Twitter](https://twitter.com/johnsundell). Here's a collection of all the tips & tricks that I've shared so far. Each entry has a link to the original tweet, if you want to respond with some feedback or question, which is always super welcome! 🚀
 
-I also write a weekly blog about Swift development at [swiftbysundell.com](https://www.swiftbysundell.com), where you can also find [my podcast](https://www.swiftbysundell.com/podcast) on which me + guests answer questions from the community! 😀
+**Also make sure to check out all of my other Swift content:**
+
+- 📖 [My weekly articles, with a new post about Swift every Sunday!](https://swiftbysundell.com)
+- 🎧 [My podcast which features special guests from around the community.](https://swiftbysundell.com/podcast)
+- 📬 [My monthly newsletter - rounding up all of my content, including these tips, on the 1st of every month.](https://swiftbysundell.com/newsletter)
 
 ## Table of contents
 
+[#102 Making async tests faster and more stable](https://github.com/johnsundell/swifttips#102-making-async-tests-faster-and-more-stable)  
+[#101 Adding support for Apple Pencil double-taps](https://github.com/johnsundell/swifttips#101-adding-support-for-apple-pencil-double-taps)  
+[#100 Combining values with functions](https://github.com/johnsundell/swifttips#100-combining-values-with-functions)  
+[#99 Dependency injection using functions](https://github.com/johnsundell/swifttips#99-dependency-injection-using-functions)  
+[#98 Using a custom exception handler](https://github.com/johnsundell/swifttips#98-using-a-custom-exception-handler)  
+[#97 Using type aliases to give semantic meaning to primitives](https://github.com/johnsundell/swifttips#97-using-type-aliases-to-give-semantic-meaning-to-primitives)  
+[#96 Specializing protocols using constraints](https://github.com/johnsundell/swifttips#96-specializing-protocols-using-constraints)  
+[#95 Unwrapping an optional or throwing an error](https://github.com/johnsundell/swifttips#95-unwrapping-an-optional-or-throwing-an-error)  
 [#94 Testing code that uses static APIs](https://github.com/johnsundell/swifttips#94-testing-code-that-uses-static-apis)  
 [#93 Matching multiple enum cases with associated values](https://github.com/johnsundell/swifttips#93-matching-multiple-enum-cases-with-associated-values)  
 [#92 Multiline string literals](https://github.com/johnsundell/swifttips#92-multiline-string-literals)  
@@ -100,6 +112,214 @@ I also write a weekly blog about Swift development at [swiftbysundell.com](https
 [#3 Referencing either external or internal parameter name when writing docs](https://github.com/JohnSundell/SwiftTips#3-referencing-either-external-or-internal-parameter-name-when-writing-docs)   
 [#2 Using auto closures](https://github.com/JohnSundell/SwiftTips#2-using-auto-closures)   
 [#1 Namespacing with nested types](https://github.com/JohnSundell/SwiftTips#1-namespacing-with-nested-types)
+
+## [#102 Making async tests faster and more stable](https://twitter.com/johnsundell/status/1062444638479491073)
+
+🚀 Here are some quick tips to make async tests faster & more stable:
+
+- 😴 Avoid sleep() - use expectations instead
+- ⏱ Use generous timeouts to avoid flakiness on CI
+- 🧐 Put all assertions at the end of each test, not inside closures
+
+```swift
+// BEFORE:
+
+class MentionDetectorTests: XCTestCase {
+    func testDetectingMention() {
+        let detector = MentionDetector()
+        let string = "This test was written by @johnsundell."
+
+        detector.detectMentions(in: string) { mentions in
+            XCTAssertEqual(mentions, ["johnsundell"])
+        }
+        
+        sleep(2)
+    }
+}
+
+// AFTER:
+
+class MentionDetectorTests: XCTestCase {
+    func testDetectingMention() {
+        let detector = MentionDetector()
+        let string = "This test was written by @johnsundell."
+
+        var mentions: [String]?
+        let expectation = self.expectation(description: #function)
+
+        detector.detectMentions(in: string) {
+            mentions = $0
+            expectation.fulfill()
+        }
+
+        waitForExpectations(timeout: 10)
+        XCTAssertEqual(mentions, ["johnsundell"])
+    }
+}
+```
+
+*For more on async testing, check out ["Unit testing asynchronous Swift code"](https://www.swiftbysundell.com/posts/unit-testing-asynchronous-swift-code).*
+
+## [#101 Adding support for Apple Pencil double-taps](https://twitter.com/johnsundell/status/1060295659549528064)
+
+✍️ Adding support for the new Apple Pencil double-tap feature is super easy! All you have to do is to create a `UIPencilInteraction`, add it to a view, and implement one delegate method. Hopefully all pencil-compatible apps will soon adopt this.
+
+```swift
+let interaction = UIPencilInteraction()
+interaction.delegate = self
+view.addInteraction(interaction)
+
+extension ViewController: UIPencilInteractionDelegate {
+    func pencilInteractionDidTap(_ interaction: UIPencilInteraction) {
+        // Handle pencil double-tap
+    }
+}
+```
+
+*For more on using this and other iPad Pro features, check out ["Building iPad Pro features in Swift"](https://www.swiftbysundell.com/posts/building-ipad-pro-features-in-swift).*
+
+## [#100 Combining values with functions](https://twitter.com/johnsundell/status/1055562781070684162)
+
+😎 Here's a cool function that combines a value with a function to return a closure that captures that value, so that it can be called without any arguments. Super useful when working with closure-based APIs and we want to use some of our properties without having to capture `self`.
+
+```swift
+func combine<A, B>(_ value: A, with closure: @escaping (A) -> B) -> () -> B {
+    return { closure(value) }
+}
+
+// BEFORE:
+
+class ProductViewController: UIViewController {
+    override func viewDidLoad() {
+        super.viewDidLoad()
+
+        buyButton.handler = { [weak self] in
+            guard let self = self else {
+                return
+            }
+            
+            self.productManager.startCheckout(for: self.product)
+        }
+    }
+}
+
+// AFTER:
+
+class ProductViewController: UIViewController {
+    override func viewDidLoad() {
+        super.viewDidLoad()
+
+        buyButton.handler = combine(product, with: productManager.startCheckout)
+    }
+}
+```
+
+## [#99 Dependency injection using functions](https://twitter.com/johnsundell/status/1054810472564879360)
+
+💉 When I'm only using a single function from a dependency, I love to inject that function as a closure, instead of having to create a protocol and inject the whole object. Makes dependency injection & testing super simple.
+
+```swift
+final class ArticleLoader {
+    typealias Networking = (Endpoint) -> Future<Data>
+    
+    private let networking: Networking
+    
+    init(networking: @escaping Networking = URLSession.shared.load) {
+        self.networking = networking
+    }
+    
+    func loadLatest() -> Future<[Article]> {
+        return networking(.latestArticles).decode()
+    }
+}
+```
+
+*For more on this technique, check out ["Simple Swift dependency injection with functions"](https://www.swiftbysundell.com/posts/simple-swift-dependency-injection-with-functions).*
+
+## [#98 Using a custom exception handler](https://twitter.com/johnsundell/status/1052282169807306755)
+
+💥 It's cool that you can easily assign a closure as a custom `NSException` handler. This is super useful when building things in Playgrounds - since you can't use breakpoints - so instead of just `signal SIGABRT`, you'll get the full exception description if something goes wrong.
+
+```swift
+NSSetUncaughtExceptionHandler { exception in
+    print(exception)
+}
+```
+
+## [#97 Using type aliases to give semantic meaning to primitives](https://twitter.com/johnsundell/status/1051249295532417024)
+
+❤️ I love that in Swift, we can use the type system to make our code so much more self-documenting - one way of doing so is to use type aliases to give the primitive types that we use a more semantic meaning.
+
+```swift
+extension List.Item {
+    // Using type aliases, we can give semantic meaning to the
+    // primitive types that we use, without having to introduce
+    // wrapper types.
+    typealias Index = Int
+}
+
+extension List {
+    enum Mutation {
+        // Our enum cases now become a lot more self-documenting,
+        // without having to add additional parameter labels to
+        // explain them.
+        case add(Item, Item.Index)
+        case update(Item, Item.Index)
+        case remove(Item.Index)
+    }
+}
+```
+
+*For more on self-documenting code, check out ["Writing self-documenting Swift code"](https://www.swiftbysundell.com/posts/writing-self-documenting-swift-code).*
+
+## [#96 Specializing protocols using constraints](https://twitter.com/johnsundell/status/1049428419040215040)
+
+🤯 A little late night prototyping session reveals that protocol constraints can not only be applied to extensions - they can also be added to protocol definitions!
+
+This is awesome, since it lets us easily define specialized protocols based on more generic ones.
+
+```swift
+protocol Component {
+    associatedtype Container
+    func add(to container: Container)
+}
+
+// Protocols that inherit from other protocols can include
+// constraints to further specialize them.
+protocol ViewComponent: Component where Container == UIView {
+    associatedtype View: UIView
+    var view: View { get }
+}
+
+extension ViewComponent {
+    func add(to container: UIView) {
+        container.addSubview(view)
+    }
+}
+```
+
+*For more on specializing protocols, check out ["Specializing protocols in Swift"](https://www.swiftbysundell.com/posts/specializing-protocols-in-swift).*
+
+## [#95 Unwrapping an optional or throwing an error](https://twitter.com/johnsundell/status/1047232852113412098)
+
+📦 Here's a super handy extension on Swift's `Optional` type, which gives us a really nice API for easily unwrapping an optional, or throwing an error in case the value turned out to be `nil`:
+
+```swift
+extension Optional {
+    func orThrow(_ errorExpression: @autoclosure () -> Error) throws -> Wrapped {
+        switch self {
+        case .some(let value):
+            return value
+        case .none:
+            throw errorExpression()
+        }
+    }
+}
+
+let file = try loadFile(at: path).orThrow(MissingFileError())
+```
+
+*For more ways that optionals can be extended, check out ["Extending optionals in Swift"](https://www.swiftbysundell.com/posts/extending-optionals-in-swift).*
 
 ## [#94 Testing code that uses static APIs](https://twitter.com/johnsundell/status/1044900209841590272)
 
